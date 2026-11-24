@@ -1,0 +1,8 @@
+[package]
+name = "game_ping_watch"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+etherparse = "0.21"
+libc = "0.2"
