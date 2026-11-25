@@ -1,10 +1,14 @@
 # game_ping_watch Handoff
 
-- Goal: Diagnose intermittent rubber-banding lag in World of Tanks Blitz on Ubuntu 24.04 by discovering the active game server IP via raw packet capture and running continuous ICMP RTT monitoring (`[SPIKE]` and `[TIMEOUT]`).
-- Current code: ~/projects/game_ping_watch/src/main.rs and Cargo.toml.
-- What is verified healthy: `ip -s link show` on `enp37s0` and `br0` shows active traffic and zero drops/errors. Raw socket privileges work via `sudo`.
-- Remaining bugs to fix & verify:
-  1. In `main()`, passing `any` still resulted in `port=Some(32862)` because `.filter(...)` -> `None` was followed by `.or(Some(32862))`. Fix with an explicit `match` so `"any"` or `"*"` is `None` and only a missing arg defaults to `Some(32862)`.
-  2. In `discover_ip()`, unwrap 802.1Q VLAN frames (`0x8100` -> inner `0x0800` at offset 18) in addition to plain Ethernet (`0x0800` at offset 14).
-  3. Support an optional 5th CLI argument for interface name (e.g., `br0` or `enp37s0`) bound on `AF_PACKET`.
-  4. Build with `cargo build --release` and test `sudo ./target/release/game_ping_watch 20 200 80 any` during gameplay.
+- Goal: Diagnose intermittent rubber-banding lag in World of Tanks Blitz on Ubuntu 24.04 by discovering the active game server IP and its associated UDP ports via raw packet capture, then concurrently monitoring ICMP RTT (`[SPIKE]`, `[TIMEOUT]`) and UDP health (`[UDP-PORT]`, `[UDP-DROP]`, `[UDP-GAP]`, `[UDP-BURST]`).
+- Current code layout:
+  - `src/main.rs` — CLI parsing (`[secs=60] [interval_ms=200] [spike_ms=80] [port=32862|any] [iface]`), `SIGINT` handling, atomic `log_line()` output, and concurrent ICMP + UDP orchestration.
+  - `src/discovery.rs` — Raw `AF_PACKET` discovery with 802.1Q VLAN unwrapping and multi-port UDP association per public IPv4 candidate.
+  - `src/ping.rs` — Continuous raw ICMP Echo Request/Reply loop.
+  - `src/queue_counters.rs` — Linux `/sys/class/net/<iface>/statistics/`, `/proc/net/snmp` (`Udp:`), and `AF_PACKET` `PACKET_STATISTICS` drop delta tracking.
+  - `src/udp_monitor.rs` — Concurrent `AF_PACKET` UDP monitor with directional flow separation (`ifindex`, `local_port`, `remote_port`, `direction`), dynamic port discovery, cadence-gap alerts, and arrival-timing burst heuristics.
+- What is verified:
+  - `ip -s link show` on `enp37s0` and `br0` shows active traffic and zero drops/errors. Raw socket privileges work via `sudo`.
+  - Unprivileged `cargo test` passes (`13` unit tests) and `cargo build --release` builds cleanly.
+- Remaining live verification:
+  - Build with `cargo build --release` and run `sudo ./target/release/game_ping_watch 20 200 80 any` (or specify `br0` / `enp37s0`) during live gameplay to validate live alerts and combined `Ctrl+C` summary output.

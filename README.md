@@ -1,11 +1,11 @@
 # game_ping_watch
 
-`game_ping_watch` discovers an active remote game server IP from live network traffic and runs a continuous ICMP ping loop until you press `Ctrl+C`. It logs round-trip time (RTT) spikes and timeouts to help spot network lag during gameplay.
+`game_ping_watch` discovers an active remote game server IP from live network traffic, runs a continuous ICMP ping loop, and concurrently monitors UDP traffic on all ports associated with that IP until you press `Ctrl+C`. It logs round-trip time (RTT) spikes, ping timeouts, local UDP/NIC/capture queue drops, mid-flow UDP silence gaps, and arrival-timing burst heuristics to help diagnose lag during gameplay.
 
 ## How It Works
 
-1. **Discovery phase:** Captures raw Ethernet frames (`0x0800` IPv4 and `0x8100` 802.1Q VLAN) on `AF_PACKET` for a set time window (default `60` seconds). It skips local, multicast, broadcast, link-local, and DNS/mDNS/SSDP traffic, ranks public IPv4 endpoints by byte count, and selects the top address.
-2. **Ping phase:** Opens a raw ICMP socket (`SOCK_RAW`, `IPPROTO_ICMP`) and sends Echo Requests at a fixed interval (default `200` ms). It prints `[SPIKE]` when RTT or RTT change reaches the spike threshold, prints `[TIMEOUT]` when a reply does not arrive within `1000` ms, and prints a summary when you press `Ctrl+C`.
+1. **Discovery phase:** Captures raw Ethernet frames (`0x0800` IPv4 and `0x8100` 802.1Q VLAN) on `AF_PACKET` for a set time window (default `60` seconds). It skips local, multicast, broadcast, link-local, and DNS/mDNS/SSDP traffic (unless explicitly filtered), ranks public IPv4 endpoints by byte count, selects the top address, and records all associated UDP ports for that IP.
+2. **Ping and UDP monitoring phase:** Runs a continuous raw ICMP Echo loop alongside a concurrent `AF_PACKET` UDP monitor for the selected server IP and its associated ports (dynamically adding new UDP ports opened with that IP). It logs `[SPIKE]` and `[TIMEOUT]` for ICMP, `[UDP-PORT]` for newly discovered ports, `[UDP-DROP]` for local NIC/host/capture queue overflows, `[UDP-GAP]` for mid-flow silence stalls, and `[UDP-BURST]` (`heuristic=order/burst`) for arrival-timing burst clusters. Pressing `Ctrl+C` prints combined ICMP and UDP summaries.
 
 ## Build
 
@@ -13,6 +13,7 @@ Requires Rust and `cargo`.
 
 ```bash
 cd ~/projects/game_ping_watch
+cargo test
 cargo build --release
 ```
 
@@ -70,3 +71,9 @@ ip -s link show br0
 ```
 
 * **ICMP filtering:** Some game servers or transit hops drop or rate-limit ICMP Echo Replies. Zero replies or high timeouts can mean ICMP filtering rather than full game packet loss.
+* **UDP diagnostic alerts:**
+  * `[UDP-PORT]`: A new remote UDP port started communicating with the detected server IP after discovery ended.
+  * `[UDP-DROP]`: Confirmed local drop delta on a NIC (`nic:<iface>`), kernel UDP buffer (`/proc/net/snmp`, `host:udp`), or `AF_PACKET` ring (`capture:af_packet`).
+  * `[UDP-GAP]`: Mid-flow packet silence on an active directional UDP stream exceeding its baseline cadence threshold.
+  * `[UDP-BURST] ... heuristic=order/burst`: Arrival-timing burst cluster (such as a stall followed by tightly bunched packets) flagged heuristically without decoding encrypted game payloads.
+* **Combined summary:** Pressing `Ctrl+C` prints ICMP `Summary` and `RTT ms` lines followed by `UDP <ip>: ports=[...] pkts=... local_drops(nic=..., host=..., cap=...) flow_gaps=... heuristic_bursts=...`.
