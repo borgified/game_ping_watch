@@ -1,11 +1,11 @@
 # game_ping_watch
 
-`game_ping_watch` discovers an active remote game server IP from live network traffic, runs a continuous ICMP ping loop, and concurrently monitors UDP traffic on all ports associated with that IP until you press `Ctrl+C`. It logs round-trip time (RTT) spikes, ping timeouts, local UDP/NIC/capture queue drops, mid-flow UDP silence gaps, and arrival-timing burst heuristics to help diagnose lag during gameplay.
+`game_ping_watch` discovers an active remote game server IP from live network traffic, runs a continuous ICMP ping loop, monitors UDP traffic on all ports associated with that IP, and runs periodic `mtr` path cycles until you press `Ctrl+C`. It logs round-trip time (RTT) spikes, ping timeouts, local UDP/NIC/capture queue drops, mid-flow UDP silence gaps, arrival-timing burst heuristics, and per-hop `mtr` path anomalies to help diagnose lag during gameplay.
 
 ## How It Works
 
 1. **Discovery phase:** Captures raw Ethernet frames (`0x0800` IPv4 and `0x8100` 802.1Q VLAN) on `AF_PACKET` for a set time window (default `60` seconds). It skips local, multicast, broadcast, link-local, and DNS/mDNS/SSDP traffic (unless explicitly filtered), ranks public IPv4 endpoints by byte count, selects the top address, and records all associated UDP ports for that IP.
-2. **Ping and UDP monitoring phase:** Runs a continuous raw ICMP Echo loop alongside a concurrent `AF_PACKET` UDP monitor for the selected server IP and its associated ports (dynamically adding new UDP ports opened with that IP). It logs `[SPIKE]` and `[TIMEOUT]` for ICMP, `[UDP-PORT]` for newly discovered ports, `[UDP-DROP]` for local NIC/host/capture queue overflows, `[UDP-GAP]` for mid-flow silence stalls, and `[UDP-BURST]` (`heuristic=order/burst`) for arrival-timing burst clusters. Pressing `Ctrl+C` prints combined ICMP and UDP summaries.
+2. **Ping, UDP, and MTR monitoring phase:** Runs a continuous raw ICMP Echo loop alongside a concurrent `AF_PACKET` UDP monitor and periodic `mtr -r -w -n -c 5` cycles for the selected server IP. It logs `[SPIKE]` and `[TIMEOUT]` for ICMP, `[UDP-PORT]` for newly discovered ports, `[UDP-DROP]` for local NIC/host/capture queue overflows, `[UDP-GAP]` for mid-flow silence stalls, `[UDP-BURST]` (`heuristic=order/burst`) for arrival-timing burst clusters, and `[MTR]` / `[MTR-HOP]` for per-cycle path windows and hop loss/latency spikes. Pressing `Ctrl+C` prints combined ICMP, UDP, and hop-by-hop MTR summaries.
 
 ## Build
 
@@ -76,4 +76,7 @@ ip -s link show br0
   * `[UDP-DROP]`: Confirmed local drop delta on a NIC (`nic:<iface>`), kernel UDP buffer (`/proc/net/snmp`, `host:udp`), or `AF_PACKET` ring (`capture:af_packet`).
   * `[UDP-GAP]`: Mid-flow packet silence on an active directional UDP stream exceeding its baseline cadence threshold.
   * `[UDP-BURST] ... heuristic=order/burst`: Arrival-timing burst cluster (such as a stall followed by tightly bunched packets) flagged heuristically without decoding encrypted game payloads.
-* **Combined summary:** Pressing `Ctrl+C` prints ICMP `Summary` and `RTT ms` lines followed by `UDP <ip>: ports=[...] pkts=... local_drops(nic=..., host=..., cap=...) flow_gaps=... heuristic_bursts=...`.
+* **Combined summary:** Pressing `Ctrl+C` prints ICMP `Summary` and `RTT ms` lines, `UDP <ip>: ports=[...] pkts=... local_drops(nic=..., host=..., cap=...) flow_gaps=... heuristic_bursts=...`, and `MTR <ip>: cycles=...` with per-hop cumulative stats.
+* **MTR diagnostic alerts:**
+  * `[MTR]`: Timestamped window (`window=start..end`) and target hop summary after each `mtr -r -w -n -c 5` cycle.
+  * `[MTR-HOP]`: Hop-level packet loss (excluding persistently silent `???` hops) or latency spike (`wrst >= spike_threshold_ms`).

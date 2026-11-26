@@ -1,4 +1,5 @@
 mod discovery;
+mod mtr;
 mod ping;
 mod queue_counters;
 mod udp_monitor;
@@ -117,6 +118,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Monitoring UDP for {} on ports [{}]. Ctrl+C to stop.",
             res.target_ip, ports_display
         );
+        println!(
+            "Running periodic mtr (-n, 5 probes/cycle) to {}.",
+            res.target_ip
+        );
 
         let target_ip = res.target_ip;
         let initial_ports = res.udp_ports;
@@ -124,6 +129,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let udp_handle = thread::spawn(move || {
             udp_monitor::monitor_udp(target_ip, initial_ports, port, udp_iface.as_deref())
         });
+
+        let mtr_iface = iface.clone();
+        let mtr_handle =
+            thread::spawn(move || mtr::monitor_mtr(target_ip, spike, mtr_iface.as_deref()));
 
         let ping_res = ping::ping_loop(target_ip, interval, spike, timeout_ms);
         if ping_res.is_err() {
@@ -133,10 +142,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let udp_res = udp_handle
             .join()
             .map_err(|_| std::io::Error::other("UDP monitor thread panicked"))?;
+        let mtr_res = mtr_handle
+            .join()
+            .map_err(|_| std::io::Error::other("mtr monitor thread panicked"))?;
 
         ping_res?;
         let summary = udp_res?;
         println!("{}", udp_monitor::format_udp_summary(target_ip, &summary));
+        let mtr_summary = mtr_res?;
+        println!("{}", mtr::format_mtr_summary(target_ip, &mtr_summary));
     } else {
         eprintln!("No public IPv4 candidate found.");
     }
